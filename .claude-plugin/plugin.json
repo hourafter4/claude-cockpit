@@ -1,0 +1,6 @@
+{
+  "name": "cockpit",
+  "version": "0.1.0",
+  "description": "Sidebar that shows what the main thread and every subagent are doing: model, effort, context, cache, current tool, recent steps, stalls, estimated cost and approval waits. Groups workflow agents by run, tracks background shells, monitors and workflows, and lets you view an agent's transcript, stop it or send it a note. Shows one summary line above the prompt when the sidebar is hidden.",
+  "types": "./types/index.d.ts"
+}
