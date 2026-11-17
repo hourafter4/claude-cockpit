@@ -46,6 +46,16 @@ Click an agent to open it. You get its last eight tool calls and its answer, or 
 
 You also get a toast when a background agent finishes. A native notification fires when an agent fails, when the whole batch is done, and when a background shell, Monitor or Workflow finishes or fails, so you can work in another window in the meantime.
 
+### usage
+
+Pinned to the bottom edge of the docked sidebar like a status bar, and it stays there while the rest scrolls. On a Claude subscription it shows the plan's limits as `/usage` has them: the 5-hour `session` and the `week`, each with a bar, the percent used and the time until it resets. The figures are Claude Code's own (`$.session.usage()`), updated after each response. A bar turns yellow at 80% and red at 90%.
+
+```
+usage  session ███░░ 62% · 3h12m   week █░░░░ 18% · 4d03h
+```
+
+Where no limits are reported (an API key, or before the first response) it shows the session's estimated cost instead, as `/cost` totals it.
+
 When the sidebar is closed, one line above the prompt carries the summary:
 
 ```

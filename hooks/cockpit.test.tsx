@@ -6,7 +6,7 @@ const BAND = { plugin: 'cockpit', component: 'AbovePrompt', requestId: 'band', p
 const PANE = { plugin: 'cockpit', component: 'Pane', requestId: 'cockpit', props: { title: 'Cockpit', isFocused: true, bodyColumns: 64, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} } } as const
 const USAGE = { startedAt: 0, context: { tokens: 323000, window: 1000000, percent: 32 }, rateLimits: [], cost: { usd: 1 } }
 
-async function setup($: any, on: any, opts: { paneShown?: boolean } = {}) {
+async function setup($: any, on: any, opts: { paneShown?: boolean; usage?: any } = {}) {
   const clock = mock.clock(on, { now: 1_000_000 })
   const toasts: string[] = []
   const stops: string[] = []
@@ -18,7 +18,7 @@ async function setup($: any, on: any, opts: { paneShown?: boolean } = {}) {
   let release = () => {}
   let chunks: any[] = []
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
-  on('session.usage', () => ({ value: USAGE }))
+  on('session.usage', () => ({ value: opts.usage ?? USAGE }))
   on('command.register', (_: any, e: any) => ({ value: { command: e.name } }))
   on('agent.list', () => ({ value: list ?? started }))
   on('agent.spawn', (_: any, e: any) => {
@@ -110,6 +110,52 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 }
+
+test('usage line at the bottom: plan limits with bars, percent and time to reset', async ($, on) => {
+  const resetsAt = (ms: number) => new Date(1_000_000 + ms).toISOString()
+  const rateLimits = [
+    { kind: 'five_hour', percentUsed: 62, resetsAt: resetsAt(3 * 60 * MIN + 12 * MIN + 30 * SEC) },
+    { kind: 'seven_day', percentUsed: 91.5, resetsAt: resetsAt(4 * 24 * 60 * MIN + 3 * 60 * MIN + 30 * SEC) },
+  ]
+  const { clock } = await setup($, on, { paneShown: true, usage: { ...USAGE, rateLimits } })
+  await clock.advance(1 * SEC)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const line = (await ui.find({ type: 'Text', text: /^usage/ }))?.text
+  expect(line).toContain('session ███░░ 62% · 3h12m   week █████ 92% · 4d03h')
+  expect(line).toHaveLength(PANE.props.bodyColumns - 2)
+  await ui.unmount()
+})
+
+test('usage line falls back to the estimated session cost when no limits are reported', async ($, on) => {
+  await setup($, on, { paneShown: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /^usage/ }))?.text).toContain('~$1.00 this session, est. · no plan limits reported')
+  await ui.unmount()
+})
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`usage line is pinned to the bottom row of the docked pane, scrolled or not (${surface})`, async ($, on) => {
+    await setup($, on, { paneShown: true })
+    for (const offset of [0, 7]) {
+      const ui = await $.ui.mount({ ...PANE, surface, props: { ...PANE.props, scroll: { offset, bodyRows: 20 } } })
+      expect(await ui.drawn()).toMatchObject({ type: 'Box', props: { minHeight: 20 } })
+      const pinned = await ui.find({ type: 'Box', key: 'usage-bar' })
+      expect(pinned?.props).toMatchObject({ position: 'absolute', top: offset + 19 })
+      expect(pinned?.text).toContain('no plan limits reported')
+      expect(pinned?.text).toHaveLength(PANE.props.bodyColumns - 2)
+      expect(await ui.find({ type: 'Box', key: 'usage-room' })).toBeTruthy()
+      await ui.unmount()
+    }
+  })
+}
+
+test('usage line just ends the tree in an inline pane, which fits its content', async ($, on) => {
+  await setup($, on, { paneShown: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, placement: 'inline' } })
+  expect(await ui.find({ type: 'Box', key: 'usage-bar' })).toBeFalsy()
+  expect((await ui.find({ type: 'Text', text: /^usage/ }))?.text).toContain('no plan limits reported')
+  await ui.unmount()
+})
 
 test('MAIN says what the model is streaming when no tool runs', async ($, on) => {
   const { step, setChunks } = await setup($, on, { paneShown: true })

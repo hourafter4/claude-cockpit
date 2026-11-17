@@ -69,6 +69,10 @@ export type MainState = {
 
 export type ContextFill = { tokens?: number; window: number; percent?: number }
 
+export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
+
+export type Usage = { limits: Limit[]; costUsd?: number }
+
 declare module 'claude-code' {
   interface PluginState {
     cockpit: {
@@ -78,6 +82,7 @@ declare module 'claude-code' {
       now: number
       main: MainState
       context: ContextFill | null
+      usage: Usage | null
     }
   }
 }

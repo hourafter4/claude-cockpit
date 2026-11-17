@@ -222,6 +222,12 @@ export function minutes(ms: number): string {
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m`
 }
 
+/** Time left until a limit resets: days and hours past a day, else as minutes() has it. */
+export function until(ms: number): string {
+  const h = Math.floor(ms / 3_600_000)
+  return h < 24 ? minutes(ms) : `${Math.floor(h / 24)}d${String(h % 24).padStart(2, '0')}h`
+}
+
 export const usd = (n: number) => (n < 10 ? `~$${n.toFixed(2)}` : `~$${Math.round(n)}`)
 
 /** The background task a main-thread tool call started, read from its result text: a shell, a Monitor or a Workflow run. */

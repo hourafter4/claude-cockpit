@@ -31,6 +31,7 @@ import {
   toolLabel,
   toolStarted,
   tree,
+  until,
   usd,
 } from './agents'
 
@@ -62,6 +63,9 @@ const selected = atom({ plugin: 'cockpit', key: 'selected' } as const, null)
 const clockNow = atom({ plugin: 'cockpit', key: 'now' } as const, 0)
 const main = atom({ plugin: 'cockpit', key: 'main' } as const, IDLE_MAIN)
 const context = atom({ plugin: 'cockpit', key: 'context' } as const, null)
+const quota = atom({ plugin: 'cockpit', key: 'usage' } as const, null)
+
+const LIMIT_WORD: Record<string, string> = { five_hour: 'session', seven_day: 'week', spend_limit: 'spend' }
 
 const BG_WORD: Record<BgRow['kind'], string> = { shell: 'shell', monitor: 'monitor', workflow: 'workflow' }
 const BG_END: Record<string, { glyph: string; color?: string; dimColor?: boolean }> = {
@@ -221,6 +225,7 @@ export const register: Register = on => {
     const now = await $.clock.now()
     const usage = await $.session.usage()
     await update($, context, () => usage.context)
+    await update($, quota, () => ({ limits: usage.rateLimits, costUsd: usage.cost?.usd }))
     const engine = await $.agent.list().catch(() => [])
     if (engine.length) await setRows($, held => synced(held, engine, now, missingSince))
     $.clock.every(TICK_MS, () => void tick($))
@@ -229,6 +234,7 @@ export const register: Register = on => {
 
   on('session.measure', async ($, e, next) => {
     if (e.changed.includes('context')) await update($, context, () => e.context)
+    if (e.changed.includes('rateLimits') || e.changed.includes('cost')) await update($, quota, () => ({ limits: e.rateLimits, costUsd: e.cost?.usd }))
     return next(e)
   })
 
@@ -616,20 +622,55 @@ async function drawPane($: EngineInterface, e: RenderInput<'Pane'>) {
     }),
   ]
 
+  const u = await read($, quota)
+  const limits = (u?.limits ?? []).map((l, n) => {
+    const left = l.resetsAt ? Date.parse(l.resetsAt) - now : NaN
+    return {
+      l,
+      word: `${n ? '   ' : ''}${LIMIT_WORD[l.kind] ?? l.kind} `,
+      tail: ` ${Math.round(l.percentUsed)}%${left > 0 ? ` · ${until(left)}` : ''}`,
+    }
+  })
+  const costText = u?.costUsd === undefined ? '' : `${usd(u.costUsd)} this session, est. · no plan limits reported`
+  // Spaces to the edge, so the line paints over the row it is pinned on.
+  const fill = ' '.repeat(Math.max(0, width - 7 - (limits.length ? limits.reduce((sum, p) => sum + p.word.length + 5 + p.tail.length, 0) : costText.length)))
+  const usageLine = limits.length
+    ? field('usage', 'usage', (
+      <Text>
+        {limits.map(({ l, word, tail }) => (
+          <Text key={l.kind}>
+            <Text dimColor>{word}</Text>
+            <Text color={l.percentUsed >= 90 ? ERROR : l.percentUsed >= 80 ? WARNING : undefined}>{bar(l.percentUsed, 5)}</Text>
+            <Text dimColor>{tail}</Text>
+          </Text>
+        ))}
+        {fill}
+      </Text>
+    ))
+    : costText ? field('usage', 'usage', <Text dimColor>{`${costText}${fill}`}</Text>) : undefined
+  // Docked, the line is pinned to the window's bottom row and paints over what scrolls beneath it; inline the frame fits the tree, so it just ends it.
+  const bodyRows = e.props.scroll.bodyRows
+  const isPinned = Boolean(usageLine) && e.props.placement !== 'inline'
+
   return (
-    <Box flexDirection="column" paddingX={1}>
-      {mainLines}
-      {bgLines}
-      <Text key="gap" dimColor>{' '}</Text>
-      {rule('agents-title', 'AGENTS', list.length ? summary : undefined)}
-      {list.length ? liveBlocks : <Text key="none" dimColor>none yet this session</Text>}
-      {doneBlocks.length > 0 && <Text key="finished" dimColor>{'finished'}</Text>}
-      {doneBlocks}
-      <Box key="foot" flexDirection="row" marginTop={1} gap={1}>
-        {done + failed + stopped + bgDone.length > 0 && <Button key="clear" hotkey="c" onPress={() => void Promise.all([setRows($, held => held.filter(isLive)), update($, bg, held => held.filter(isBgLive))])}>Clear finished</Button>}
-        {viewing && <Button key="back" hotkey="m" onPress={() => void $.ui.view({})}>Back to main</Button>}
-        {list.length > 0 && <Text dimColor>click an agent for details</Text>}
+    <Box flexDirection="column" minHeight={isPinned ? bodyRows : undefined}>
+      <Box key="body" flexDirection="column" paddingX={1} flexGrow={1}>
+        {mainLines}
+        {bgLines}
+        <Text key="gap" dimColor>{' '}</Text>
+        {rule('agents-title', 'AGENTS', list.length ? summary : undefined)}
+        {list.length ? liveBlocks : <Text key="none" dimColor>none yet this session</Text>}
+        {doneBlocks.length > 0 && <Text key="finished" dimColor>{'finished'}</Text>}
+        {doneBlocks}
+        <Box key="foot" flexDirection="row" marginTop={1} gap={1}>
+          {done + failed + stopped + bgDone.length > 0 && <Button key="clear" hotkey="c" onPress={() => void Promise.all([setRows($, held => held.filter(isLive)), update($, bg, held => held.filter(isBgLive))])}>Clear finished</Button>}
+          {viewing && <Button key="back" hotkey="m" onPress={() => void $.ui.view({})}>Back to main</Button>}
+          {list.length > 0 && <Text dimColor>click an agent for details</Text>}
+        </Box>
+        {!isPinned && usageLine}
       </Box>
+      {isPinned && <Box key="usage-room" height={1} />}
+      {isPinned && <Box key="usage-bar" position="absolute" top={e.props.scroll.offset + bodyRows - 1} left={1} right={1}>{usageLine}</Box>}
     </Box>
   )
 }
